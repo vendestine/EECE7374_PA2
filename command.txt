@@ -1,0 +1,5 @@
+./sanity_tests -p ../li.wenzhe1/abt -r ./run_experiments
+./basic_tests -p ../li.wenzhe1/abt -r ./run_experiments
+./advanced_tests -p ../li.wenzhe1/abt -r ./run_experiments
+
+./abt -s 1234 -w 50  -m 20 -l 0.0 -c 0.0 -t 1000 -v 2
