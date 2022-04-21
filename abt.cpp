@@ -63,21 +63,26 @@ int get_checksum(pkt packet)
 }
 
 //make packet for message
-pkt make_packet(int seqnum, int acknum, msg message) 
+pkt make_packet(int seqnum, msg message) 
 {
     pkt packet;
     packet.seqnum = seqnum;
-    packet.acknum = acknum;
+    packet.acknum = seqnum;
     strncpy(packet.payload, message.data, 20);
     packet.checksum = get_checksum(packet);
     return packet;
 }
 
-//pkt make_ACKpacket(int seqnum, int acknum, msg message)
-//{
-//    pkt packet;
-//
-//}
+pkt make_ACKpacket(int acknum)
+{
+    pkt packet;
+    packet.seqnum = 0;
+    packet.acknum = acknum;
+    memset(packet.payload, 0, sizeof(packet.payload));
+    packet.checksum = get_checksum(packet);
+    return packet;
+
+}
 
 
 /* called from layer 5, passed the data to be sent to other side */
@@ -92,7 +97,7 @@ void A_output(struct msg message)
     else
     {
         cout << "Sending the current message" << endl;
-        pkt packet = make_packet(host_a.seqnum, host_a.acknum, message);
+        pkt packet = make_packet(host_a.seqnum, message);
         cout << "Sending from A:\n" << "msg:" << message.data << "\n" << "Seq Number:" << host_a.seqnum << "\nAck number:" << host_a.acknum << endl;
         tolayer3(A, packet);
         host_a.state = WAITLAYER3;
@@ -103,7 +108,6 @@ void A_output(struct msg message)
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-    cout << "Ack packet received from B with ack number:" << packet.acknum << endl;
     if ((packet.checksum != get_checksum(packet)) || (packet.acknum != host_a.acknum))
     {
         cout << "Packet is corrupted/has wrong ackno, waiting ack no is: " << host_a.acknum << endl;
@@ -115,17 +119,11 @@ void A_input(struct pkt packet)
     msg_buffer.pop();
     host_a.state = WAITLAYER5;
     host_a.seqnum = (host_a.seqnum + 1) % 2;
-    host_a.acknum = (host_a.acknum + 1) % 2;
+    host_a.acknum = host_a.seqnum;
     if (msg_buffer.size() > 0)
     {
         cout << "Messages has been queued in Buffer, sending that now" << endl;
-        //pkt packet;
-        //packet.seqnum = host_a.seqnum;
-        //packet.acknum = host_a.acknum;
-        //string msg = msg_buffer.front();
-        //strncpy(packet.payload, msg.c_str(), 20);
-        //packet.checksum = get_checksum(packet);
-        pkt packet = make_packet(host_a.seqnum, host_a.acknum, msg_buffer.front());
+        pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
         cout << "Sending from A:\n" << "msg:" << msg_buffer.front().data << "\n" << "Seq Number:" << host_a.seqnum << "\nAck number:" << host_a.acknum << endl;
         tolayer3(A, packet);
         host_a.state = WAITLAYER3;
@@ -138,13 +136,7 @@ void A_input(struct pkt packet)
 void A_timerinterrupt()
 {
     cout << "Timer has expired for the current packet with Seq number:" << host_a.seqnum << " Hence resending the packet" << endl;
-    //pkt packet;
-    //packet.seqnum = host_a.seqnum;
-    //packet.acknum = host_a.acknum;
-    //string msg = msg_buffer.front();
-    //strncpy(packet.payload, msg.c_str(), 20);
-    //packet.checksum = get_checksum(packet);
-    pkt packet = make_packet(host_a.seqnum, host_a.acknum, msg_buffer.front());
+    pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
     cout << "Sending from A:\n" << "msg:" << packet.payload << "\n" << "Seq Number:" << host_a.seqnum << "\nAck number:" << host_a.acknum << endl;
     tolayer3(A, packet);
     host_a.state = WAITLAYER3;
@@ -167,22 +159,13 @@ void B_input(struct pkt packet)
 {
     if (packet.checksum == get_checksum(packet))
     {
-        cout << "Received packet with payload " << packet.payload << ", seq=" << packet.seqnum << " ack=" << packet.acknum << endl;
-        pkt ack_packet;
+        pkt ack_packet = make_ACKpacket(packet.seqnum);
+        tolayer3(B, ack_packet);
+
         if (packet.seqnum == host_b.acknum)
         {
             tolayer5(B, packet.payload);
-            ack_packet.acknum = packet.seqnum;
-            ack_packet.checksum = get_checksum(ack_packet);
-            tolayer3(B, ack_packet);
             host_b.acknum = (host_b.acknum + 1) % 2;
-            cout << "Send the ack packet: " << "ack=" << ack_packet.acknum << " next expected seq number:" << host_b.acknum << endl;
-        }
-        else {
-            ack_packet.acknum = packet.seqnum;
-            ack_packet.checksum = get_checksum(ack_packet);
-            cout << "Response to sender: " << "ack=" << ack_packet.acknum << " next expected seq=" << host_b.acknum << endl;
-            tolayer3(B, ack_packet);
         }
     }
     else
