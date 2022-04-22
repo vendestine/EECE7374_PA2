@@ -30,6 +30,7 @@ using namespace std;
 queue<msg> msg_buffer;
 
 //
+struct pkt resend_packet;
 
 //create variables for sender
 struct Sender
@@ -90,10 +91,10 @@ pkt make_ACKpacket(int acknum)
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message)
 {
-    msg_buffer.push(message);
     if (host_a.state == WAITLAYER5)
     {
         pkt packet = make_packet(host_a.seqnum, message);
+        resend_packet = packet;
         tolayer3(A, packet);
         host_a.state = WAITLAYER3;
         starttimer(A, TIMEOUT);
@@ -101,7 +102,7 @@ void A_output(struct msg message)
     else
     {
         cout << "Waiting for acknowledgement of the correct packet, hence adding to message buffer" << endl;
-        return;
+        msg_buffer.push(message);
     }
 }
 
@@ -112,7 +113,6 @@ void A_input(struct pkt packet)
     {
         cout << "Right acknowledgement received without corruption and right ack no:" << host_a.acknum << endl;
         stoptimer(A);
-        msg_buffer.pop();
         host_a.seqnum = (host_a.seqnum + 1) % 2;
         host_a.acknum = host_a.seqnum;
         host_a.state = WAITLAYER5;
@@ -120,6 +120,8 @@ void A_input(struct pkt packet)
         if (!msg_buffer.empty())
         {
             pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
+            msg_buffer.pop();
+            resend_packet = packet;
             tolayer3(A, packet);
             host_a.state = WAITLAYER3;
             starttimer(A, TIMEOUT);
@@ -137,8 +139,7 @@ void A_input(struct pkt packet)
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
-    pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
-    tolayer3(A, packet);
+    tolayer3(A, resend_packet);
     host_a.state = WAITLAYER3;
     starttimer(A, TIMEOUT);
     cout << "Leaving timerinterrupt" << endl;
