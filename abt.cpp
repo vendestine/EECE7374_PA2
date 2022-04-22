@@ -65,7 +65,7 @@ int get_checksum(pkt packet)
 }
 
 //make packet for message
-pkt make_packet(int seqnum, msg message) 
+pkt make_packet(int seqnum, msg message)
 {
     pkt packet;
     packet.seqnum = seqnum;
@@ -108,27 +108,30 @@ void A_output(struct msg message)
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-    if ((packet.checksum != get_checksum(packet)) || (packet.acknum != host_a.acknum))
+    if ((packet.checksum == get_checksum(packet)) || (packet.acknum == host_a.acknum))
+    {
+        cout << "Right acknowledgement received without corruption and right ack no:" << host_a.acknum << endl;
+        stoptimer(A);
+        msg_buffer.pop();
+        host_a.seqnum = (host_a.seqnum + 1) % 2;
+        host_a.acknum = host_a.seqnum;
+        host_a.state = WAITLAYER5;
+
+        if (!msg_buffer.empty())
+        {
+            pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
+            tolayer3(A, packet);
+            host_a.state = WAITLAYER3;
+            starttimer(A, TIMEOUT);
+        }
+        cout << "Leaving A_input" << endl;
+    }
+
+    else
     {
         cout << "Packet is corrupted/has wrong ackno, waiting ack no is: " << host_a.acknum << endl;
         return;
     }
-
-    cout << "Right acknowledgement received without corruption and right ack no:" << host_a.acknum << endl;
-    stoptimer(A);
-    msg_buffer.pop();
-    host_a.seqnum = (host_a.seqnum + 1) % 2;
-    host_a.acknum = host_a.seqnum;
-    host_a.state = WAITLAYER5;
-
-    if (!msg_buffer.empty())
-    {
-        pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
-        tolayer3(A, packet);
-        host_a.state = WAITLAYER3;
-        starttimer(A, TIMEOUT);
-    }
-    cout << "Leaving A_input" << endl;
 }
 
 /* called when A's timer goes off */
