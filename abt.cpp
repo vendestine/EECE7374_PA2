@@ -67,7 +67,7 @@ pkt make_packet(int seqnum, msg message)
 {
     pkt packet;
     packet.seqnum = seqnum;
-    packet.acknum = seqnum;
+    packet.acknum = 0;
     strncpy(packet.payload, message.data, 20);
     packet.checksum = get_checksum(packet);
     return packet;
@@ -89,19 +89,17 @@ pkt make_ACKpacket(int acknum)
 void A_output(struct msg message)
 {
     msg_buffer.push(message);
-    if (host_a.state == WAITLAYER3)
+    if (host_a.state == WAITLAYER5)
     {
-        cout << "Waiting for acknowledgement of the correct packet, hence adding to message buffer" << endl;
-        return;
-    }
-    else
-    {
-        cout << "Sending the current message" << endl;
         pkt packet = make_packet(host_a.seqnum, message);
-        cout << "Sending from A:\n" << "msg:" << message.data << "\n" << "Seq Number:" << host_a.seqnum << "\nAck number:" << host_a.acknum << endl;
         tolayer3(A, packet);
         host_a.state = WAITLAYER3;
         starttimer(A, TIMEOUT);
+    }
+    else
+    {
+        cout << "Waiting for acknowledgement of the correct packet, hence adding to message buffer" << endl;
+        return;
     }
 }
 
@@ -117,14 +115,13 @@ void A_input(struct pkt packet)
     cout << "Right acknowledgement received without corruption and right ack no:" << host_a.acknum << endl;
     stoptimer(A);
     msg_buffer.pop();
-    host_a.state = WAITLAYER5;
     host_a.seqnum = (host_a.seqnum + 1) % 2;
     host_a.acknum = host_a.seqnum;
+    host_a.state = WAITLAYER5;
+
     if (msg_buffer.size() > 0)
     {
-        cout << "Messages has been queued in Buffer, sending that now" << endl;
         pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
-        cout << "Sending from A:\n" << "msg:" << msg_buffer.front().data << "\n" << "Seq Number:" << host_a.seqnum << "\nAck number:" << host_a.acknum << endl;
         tolayer3(A, packet);
         host_a.state = WAITLAYER3;
         starttimer(A, TIMEOUT);
@@ -135,9 +132,7 @@ void A_input(struct pkt packet)
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
-    cout << "Timer has expired for the current packet with Seq number:" << host_a.seqnum << " Hence resending the packet" << endl;
     pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
-    cout << "Sending from A:\n" << "msg:" << packet.payload << "\n" << "Seq Number:" << host_a.seqnum << "\nAck number:" << host_a.acknum << endl;
     tolayer3(A, packet);
     host_a.state = WAITLAYER3;
     starttimer(A, TIMEOUT);
