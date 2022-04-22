@@ -26,7 +26,10 @@ using namespace std;
 #define WAITLAYER3 0
 #define WAITLAYER5 1
 
-std::queue<msg> msg_buffer;
+//message buffer
+queue<msg> msg_buffer;
+
+//
 
 //create variables for sender
 struct Sender
@@ -42,7 +45,6 @@ struct Sender
 //create variables for receiver
 struct Receiver
 {
-    //the ack number for the packet
     int acknum;
 }host_b;
 
@@ -67,7 +69,7 @@ pkt make_packet(int seqnum, msg message)
 {
     pkt packet;
     packet.seqnum = seqnum;
-    packet.acknum = 0;
+    packet.acknum = seqnum;
     strncpy(packet.payload, message.data, 20);
     packet.checksum = get_checksum(packet);
     return packet;
@@ -119,7 +121,7 @@ void A_input(struct pkt packet)
     host_a.acknum = host_a.seqnum;
     host_a.state = WAITLAYER5;
 
-    if (msg_buffer.size() > 0)
+    if (!msg_buffer.empty())
     {
         pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
         tolayer3(A, packet);
@@ -144,7 +146,7 @@ void A_timerinterrupt()
 void A_init()
 {
     host_a.seqnum = 0;
-    host_a.acknum = 0;
+    host_a.acknum = host_a.seqnum;
     host_a.state = WAITLAYER5;
 }
 
@@ -154,10 +156,10 @@ void B_input(struct pkt packet)
 {
     if (packet.checksum == get_checksum(packet))
     {
-        pkt ack_packet = make_ACKpacket(packet.seqnum);
+        pkt ack_packet = make_ACKpacket(packet.acknum);
         tolayer3(B, ack_packet);
 
-        if (packet.seqnum == host_b.acknum)
+        if (packet.acknum == host_b.acknum)
         {
             tolayer5(B, packet.payload);
             host_b.acknum = (host_b.acknum + 1) % 2;
