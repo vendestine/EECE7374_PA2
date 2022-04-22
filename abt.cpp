@@ -15,21 +15,26 @@
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
 
 #include <iostream>
-#include <stdio.h>
+#include <cstring>
 #include <queue>
-#include <string.h>
 
 using namespace std;
+
+//define host A and B
 #define A 0
 #define B 1
+
+//define timeout for retransmission
 #define TIMEOUT 20.0
-#define WAITLAYER3 0
-#define WAITLAYER5 1
+
+//define host A state (wait up layer or wait down layer)
+#define WAIT_LAYER3 0
+#define WAIT_LAYER5 1
 
 //message buffer
 queue<msg> msg_buffer;
 
-//
+//saved packet for possible retransmission
 struct pkt resend_packet;
 
 //create variables for sender
@@ -53,7 +58,6 @@ struct Receiver
 //calculate the checksum of a packet
 int get_checksum(pkt packet)
 {
-    //cout << "checksum start" << endl;
     int checksum = 0;
     checksum += packet.seqnum;
     checksum += packet.acknum;
@@ -61,24 +65,26 @@ int get_checksum(pkt packet)
     {
         checksum += packet.payload[i];
     }
-    //cout << "checksum end" << endl;
     return checksum;
 }
 
-//make packet for message
+//make packet for sender
 pkt make_packet(int seqnum, msg message)
 {
     pkt packet;
     packet.seqnum = seqnum;
+    //excpeted ack number is sequnce number
     packet.acknum = seqnum;
     strncpy(packet.payload, message.data, 20);
     packet.checksum = get_checksum(packet);
     return packet;
 }
 
+//make packet for receiver
 pkt make_ACKpacket(int acknum)
 {
     pkt packet;
+    //for ACK packet, we only focus ack number
     packet.seqnum = 0;
     packet.acknum = acknum;
     memset(packet.payload, 0, sizeof(packet.payload));
@@ -91,17 +97,20 @@ pkt make_ACKpacket(int acknum)
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message)
 {
-    if (host_a.state == WAITLAYER5)
+    // if host A waits up layer, send the packet
+    if (host_a.state == WAIT_LAYER5)
     {
         pkt packet = make_packet(host_a.seqnum, message);
+        //save packet for possible retransimission
         resend_packet = packet;
         tolayer3(A, packet);
-        host_a.state = WAITLAYER3;
+        //after send packet to layer 3, change state
+        host_a.state = WAIT_LAYER3;
         starttimer(A, TIMEOUT);
     }
     else
     {
-        cout << "Waiting for acknowledgement of the correct packet, hence adding to message buffer" << endl;
+        //if host A wait down layer, buffer current message
         msg_buffer.push(message);
     }
 }
@@ -109,29 +118,34 @@ void A_output(struct msg message)
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
+    //receive right ACK packet, no corruption, stop timer
     if ((packet.checksum == get_checksum(packet)) || (packet.acknum == host_a.acknum))
     {
-        cout << "Right acknowledgement received without corruption and right ack no:" << host_a.acknum << endl;
         stoptimer(A);
+        //flip sender sequnce number for next packet
         host_a.seqnum = (host_a.seqnum + 1) % 2;
         host_a.acknum = host_a.seqnum;
-        host_a.state = WAITLAYER5;
+        //change state to wait up layer
+        host_a.state = WAIT_LAYER5;
 
+        //there is meesage in buffer
         if (!msg_buffer.empty())
         {
+            //send the message, after sending, pop the message
             pkt packet = make_packet(host_a.seqnum, msg_buffer.front());
             msg_buffer.pop();
+            //also save packet for possible retransmission
             resend_packet = packet;
             tolayer3(A, packet);
-            host_a.state = WAITLAYER3;
+            //after send packet to layer3, change state
+            host_a.state = WAIT_LAYER3;
             starttimer(A, TIMEOUT);
         }
-        cout << "Leaving A_input" << endl;
     }
 
+    //there is packet corruption or receive wrong ACK
     else
     {
-        cout << "Packet is corrupted/has wrong ackno, waiting ack no is: " << host_a.acknum << endl;
         return;
     }
 }
@@ -139,10 +153,11 @@ void A_input(struct pkt packet)
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
+    //resned the packet
     tolayer3(A, resend_packet);
-    host_a.state = WAITLAYER3;
+    //after send packet to layer3, change state
+    host_a.state = WAIT_LAYER3;
     starttimer(A, TIMEOUT);
-    cout << "Leaving timerinterrupt" << endl;
 }
 
 /* the following routine will be called once (only) before any other */
@@ -151,21 +166,26 @@ void A_init()
 {
     host_a.seqnum = 0;
     host_a.acknum = host_a.seqnum;
-    host_a.state = WAITLAYER5;
+    //in the beginning, wait for message from up player
+    host_a.state = WAIT_LAYER5;
 }
 
 /* Note that with simplex transfer from a-to-B, there is no B_output() */
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 void B_input(struct pkt packet)
 {
+    //packet no corruption
     if (packet.checksum == get_checksum(packet))
     {
+        //send ACK packet to A
         pkt ack_packet = make_ACKpacket(packet.acknum);
         tolayer3(B, ack_packet);
 
+        //no receive this packet before, deliver message to up layer
         if (packet.acknum == host_b.acknum)
         {
             tolayer5(B, packet.payload);
+            ////flip receiver ack number for next packet
             host_b.acknum = (host_b.acknum + 1) % 2;
         }
     }
