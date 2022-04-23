@@ -28,10 +28,10 @@ using namespace std;
 #define TIMEOUT 100.0
 
 //packet in the window
-vector<pkt> unacked(1000 + 10);
+vector<pkt> unacked(1000);
 
 //message buffer outside window
-queue<msg> buffer;
+queue<msg> msg_buffer;
 
 
 //ACK packet
@@ -43,6 +43,7 @@ struct Sender
     int base;
     int next_seqnum;
     int N;
+    int last_ack;
 
 }host_a;
 
@@ -73,7 +74,7 @@ pkt make_packet(int seqnum, msg message)
     pkt packet;
     packet.seqnum = seqnum;
     //excpeted ack number is sequnce number
-    packet.acknum = 0;
+    packet.acknum = seqnum;
     strncpy(packet.payload, message.data, 20);
     packet.checksum = get_checksum(packet);
     return packet;
@@ -84,7 +85,7 @@ pkt make_ACKpacket(int acknum)
 {
     pkt packet;
     //for ACK packet, we only focus ack number
-    packet.seqnum = 0;
+    packet.seqnum = acknum;
     packet.acknum = acknum;
     memset(packet.payload, 0, sizeof(packet.payload));
     packet.checksum = get_checksum(packet);
@@ -97,64 +98,94 @@ pkt make_ACKpacket(int acknum)
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message)
 {
-    
-    if (host_a.next_seqnum < (host_a.base + host_a.N))
+    if (host_a.next_seqnum < host_a.base + host_a.N)
     {
-        pkt packet = make_packet(host_a.next_seqnum, message);
-        unacked[host_a.next_seqnum]= packet;
-        tolayer3(A, packet);
-
-        if (host_a.base == host_a.next_seqnum)
+        if (msg_buffer.empty())
         {
-            starttimer(A, TIMEOUT);
+            pkt packet = make_packet(host_a.next_seqnum, message);
+            unacked[host_a.next_seqnum % host_a.N] = packet;
+            tolayer3(A, packet);
+
+            if (host_a.base == host_a.next_seqnum)
+                starttimer(A, TIMEOUT);
+            host_a.next_seqnum++;
+
         }
-        host_a.next_seqnum++;
+
+        else
+        {
+            msg_buffer.push(message);
+            msg buffer_message = msg_buffer.front();
+            msg_buffer.pop();
+           
+
+            pkt packet = make_packet(host_a.next_seqnum, buffer_message);
+            unacked[host_a.next_seqnum % host_a.N] = packet;
+            tolayer3(A, packet);
+
+            if (host_a.base == host_a.next_seqnum)
+                starttimer(A, TIMEOUT);
+            host_a.next_seqnum++;
+        }
     }
 
     else
     {
-        buffer.push(message);
+        msg_buffer.push(message);
+
     }
 }
 
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-    if (packet.checksum == get_checksum(packet) && (packet.acknum >= host_a.base))
+    if (packet.checksum == get_checksum(packet))
     {
-        stoptimer(A);
-        while (host_a.base <= packet.acknum)
+        if (packet.acknum <= host_a.last_ack)
+            cout << "duplicate ack" << endl;
+        
+        else if (packet.acknum <= (host_a.last_ack + host_a.N))
         {
-            unacked.erase(unacked.begin() + host_a.base);
-            host_a.base++;
-        }
-           
-        while (!buffer.empty() && host_a.next_seqnum < (host_a.base + host_a.N))
-        {
-            msg message = buffer.front();
-            buffer.pop();
-            pkt buffer_packet = make_packet(host_a.next_seqnum, message);
-            unacked[host_a.next_seqnum] = buffer_packet;
-            tolayer3(A, buffer_packet);
-            host_a.next_seqnum++;
-        }
+            host_a.last_ack = packet.acknum;
+            stoptimer(A);
 
-        if (host_a.base != host_a.next_seqnum) {
-            starttimer(A, TIMEOUT);
+            if (host_a.next_seqnum > host_a.last_ack + 1)
+                starttimer(A, TIMEOUT);
+
+            host_a.base = host_a.last_ack + 1;;
+
+            if (!msg_buffer.empty())
+            {
+                msg message = msg_buffer.front();
+                msg_buffer.pop();
+                pkt buffer_packet = make_packet(host_a.next_seqnum, message);
+                unacked[host_a.next_seqnum % host_a.N] = buffer_packet;
+                tolayer3(A, buffer_packet);
+                host_a.next_seqnum++;
+            }
         }
+    }
+
+    else
+    {
+        cout << "packet corruption" << endl;
     }
 }
 
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
-    
-    for (int i = host_a.base; i < host_a.next_seqnum; i++)
-    {
-        tolayer3(A, unacked[i]);
-    }
+    pkt packet = unacked[host_a.base % host_a.N];
+    int base = packet.seqnum;
+    tolayer3(A, packet);
     starttimer(A, TIMEOUT);
+    base++;
 
+    while (base < host_a.next_seqnum)
+    {
+        tolayer3(A, unacked[base % host_a.N]);
+        base++;
+    }
 }
 
 /* the following routine will be called once (only) before any other */
@@ -164,6 +195,7 @@ void A_init()
     host_a.base = 1;
     host_a.next_seqnum = 1;
     host_a.N = getwinsize();
+    host_a.last_ack = 0;
 }
 
 
