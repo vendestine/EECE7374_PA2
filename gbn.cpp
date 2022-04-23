@@ -5,11 +5,11 @@
    This code should be used for PA2, unidirectional data transfer
    protocols (from A to B). Network properties:
    - one way network delay averages five time units (longer if there
-     are other messages in the channel for GBN), but can be larger
+	 are other messages in the channel for GBN), but can be larger
    - packets can be corrupted (either the header or the data portion)
-     or lost, according to user-defined probabilities
+	 or lost, according to user-defined probabilities
    - packets will be delivered in the order in which they were sent
-     (although some can be lost).
+	 (although some can be lost).
 **********************************************************************/
 
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
@@ -25,7 +25,7 @@ using namespace std;
 #define B 1
 
 //define timeout for retransmission
-#define TIMEOUT 100.0
+#define TIMEOUT 20.0
 
 //packet in the window
 vector<pkt> unacked(1000);
@@ -40,16 +40,16 @@ pkt ack_packet;
 //create variables for sender
 struct Sender
 {
-    int base;
-    int next_seqnum;
-    int last_ack;
-    int N;
+	int base;
+	int next_seqnum;
+	int last_ack;
+	int N;
 }host_a;
 
 //create variables for receiver
 struct Receiver
 {
-    int expected_seqnum;
+	int expected_seqnum;
 
 }host_b;
 
@@ -57,38 +57,38 @@ struct Receiver
 //calculate the checksum of a packet
 int get_checksum(pkt packet)
 {
-    int checksum = 0;
-    checksum += packet.seqnum;
-    checksum += packet.acknum;
-    for (int i = 0; i < 20; ++i)
-    {
-        checksum += packet.payload[i];
-    }
-    return checksum;
+	int checksum = 0;
+	checksum += packet.seqnum;
+	checksum += packet.acknum;
+	for (int i = 0; i < 20; ++i)
+	{
+		checksum += packet.payload[i];
+	}
+	return checksum;
 }
 
 //make packet for sender
 pkt make_packet(int seqnum, msg message)
 {
-    pkt packet;
-    packet.seqnum = seqnum;
-    //excpeted ack number is sequnce number
-    packet.acknum = seqnum;
-    strncpy(packet.payload, message.data, 20);
-    packet.checksum = get_checksum(packet);
-    return packet;
+	pkt packet;
+	packet.seqnum = seqnum;
+	//excpeted ack number is sequnce number
+	packet.acknum = seqnum;
+	strncpy(packet.payload, message.data, 20);
+	packet.checksum = get_checksum(packet);
+	return packet;
 }
 
 //make packet for receiver
 pkt make_ACKpacket(int acknum)
 {
-    pkt packet;
-    //for ACK packet, we only focus ack number
-    packet.seqnum = acknum;
-    packet.acknum = acknum;
-    memset(packet.payload, 0, sizeof(packet.payload));
-    packet.checksum = get_checksum(packet);
-    return packet;
+	pkt packet;
+	//for ACK packet, we only focus ack number
+	packet.seqnum = acknum;
+	packet.acknum = acknum;
+	memset(packet.payload, 0, sizeof(packet.payload));
+	packet.checksum = get_checksum(packet);
+	return packet;
 
 }
 
@@ -96,112 +96,93 @@ pkt make_ACKpacket(int acknum)
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message)
 {
-    if (host_a.next_seqnum < host_a.base + host_a.N)
-    {
-        if (msg_buffer.empty())
-        {
-            pkt packet = make_packet(host_a.next_seqnum, message);
-            unacked[host_a.next_seqnum % host_a.N] = packet;
-            tolayer3(A, packet);
+	if (host_a.next_seqnum < host_a.base + host_a.N)
+	{
+		if (msg_buffer.empty())
+		{
+			pkt packet = make_packet(host_a.next_seqnum, message);
+			unacked[host_a.next_seqnum % host_a.N] = packet;
+			tolayer3(A, packet);
 
-            if (host_a.base == host_a.next_seqnum)
-                starttimer(A, TIMEOUT);
-            host_a.next_seqnum++;
+			if (host_a.base == host_a.next_seqnum)
+				starttimer(A, TIMEOUT);
+			host_a.next_seqnum++;
 
-        }
+		}
 
-        else
-        {
-            msg_buffer.push(message);
-            msg buffer_message = msg_buffer.front();
-            msg_buffer.pop();
-           
+		else
+		{
+			msg_buffer.push(message);
+			msg buffer_message = msg_buffer.front();
+			msg_buffer.pop();
 
-            pkt packet = make_packet(host_a.next_seqnum, buffer_message);
-            unacked[host_a.next_seqnum % host_a.N] = packet;
-            tolayer3(A, packet);
 
-            if (host_a.base == host_a.next_seqnum)
-                starttimer(A, TIMEOUT);
-            host_a.next_seqnum++;
-        }
-    }
+			pkt packet = make_packet(host_a.next_seqnum, buffer_message);
+			unacked[host_a.next_seqnum % host_a.N] = packet;
+			tolayer3(A, packet);
 
-    else
-    {
-        msg_buffer.push(message);
+			if (host_a.base == host_a.next_seqnum)
+				starttimer(A, TIMEOUT);
+			host_a.next_seqnum++;
+		}
+	}
 
-    }
+	else
+	{
+		msg_buffer.push(message);
+
+	}
 }
 
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-    if (packet.checksum == get_checksum(packet))
-    {
-        if (packet.acknum <= host_a.last_ack)
-            cout << "duplicate ack" << endl;
-        
-        else if (packet.acknum <= (host_a.last_ack + host_a.N))
-        {
-            host_a.last_ack = packet.acknum;
-            stoptimer(A);
+	if (packet.checksum == get_checksum(packet))
+	{
+		host_a.base = packet.acknum + 1;
+		stoptimer(A);
 
-            if (host_a.next_seqnum > host_a.last_ack + 1)
-                starttimer(A, TIMEOUT);
+		if (host_a.next_seqnum > host_a.base)
+			starttimer(A, TIMEOUT);
+	}
 
-            host_a.base = host_a.last_ack + 1;;
-
-            if (!msg_buffer.empty())
-            {
-                msg message = msg_buffer.front();
-                msg_buffer.pop();
-
-                pkt buffer_packet = make_packet(host_a.next_seqnum, message);
-                unacked[host_a.next_seqnum % host_a.N] = buffer_packet;
-                tolayer3(A, buffer_packet);
-                host_a.next_seqnum++;
-            }
-        }
-    }
-
-    else
-    {
-        cout << "packet corruption" << endl;
-    }
+	else
+	{
+		cout << "packet corruption" << endl;
+	}
 }
 
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
-    //pkt packet = unacked[host_a.base % host_a.N];
-    //int base = packet.seqnum;
-    //tolayer3(A, packet);
-    //starttimer(A, TIMEOUT);
-    //base++;
+	//pkt packet = unacked[host_a.base % host_a.N];
+	//int base = packet.seqnum;
+	//tolayer3(A, packet);
+	//starttimer(A, TIMEOUT);
+	//base++;
 
-    //while (base < host_a.next_seqnum)
-    //{
-    //    tolayer3(A, unacked[base % host_a.N]);
-    //    base++;
-    //}
+	//while (base < host_a.next_seqnum)
+	//{
+	//    tolayer3(A, unacked[base % host_a.N]);
+	//    base++;
+	//}
 
-    
-    starttimer(A, TIMEOUT);
-    for (int i = host_a.base; i < host_a.next_seqnum; i++)
-    {
-        tolayer3(A, unacked[i % host_a.N]);
-    }
+
+	starttimer(A, TIMEOUT);
+	for (int i = host_a.base; i < host_a.next_seqnum; i++)
+	{
+		tolayer3(A, unacked[i % host_a.N]);
+	}
 }
 
 /* the following routine will be called once (only) before any other */
 /* entity A routines are called. You can use it to do any initialization */
 void A_init()
 {
-    host_a.base = 1;
-    host_a.next_seqnum = 1;
-    host_a.N = getwinsize();
-    host_a.last_ack = 0;
+	host_a.base = 1;
+	host_a.next_seqnum = 1;
+	host_a.N = getwinsize();
+	host_a.last_ack = 0;
 }
 
 
@@ -209,19 +190,19 @@ void A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 void B_input(struct pkt packet)
 {
-    if (packet.checksum == get_checksum(packet) && packet.seqnum == host_b.expected_seqnum)
-    {
-        tolayer5(B, packet.payload);
-        ack_packet = make_ACKpacket(host_b.expected_seqnum);
-        host_b.expected_seqnum++;
-    }
-    tolayer3(B, ack_packet);
+	if (packet.checksum == get_checksum(packet) && packet.seqnum == host_b.expected_seqnum)
+	{
+		tolayer5(B, packet.payload);
+		ack_packet = make_ACKpacket(host_b.expected_seqnum);
+		host_b.expected_seqnum++;
+	}
+	tolayer3(B, ack_packet);
 }
 
 /* the following rouytine will be called once (only) before any other */
 /* entity B routines are called. You can use it to do any initialization */
 void B_init()
 {
-    host_b.expected_seqnum = 1;
-    ack_packet = make_ACKpacket(0);
+	host_b.expected_seqnum = 1;
+	ack_packet = make_ACKpacket(0);
 }
