@@ -42,9 +42,8 @@ struct Sender
 {
     int base;
     int next_seqnum;
-    int N;
     int last_ack;
-
+    int N;
 }host_a;
 
 //create variables for receiver
@@ -92,7 +91,6 @@ pkt make_ACKpacket(int acknum)
     return packet;
 
 }
-
 
 
 /* called from layer 5, passed the data to be sent to other side */
@@ -158,6 +156,7 @@ void A_input(struct pkt packet)
             {
                 msg message = msg_buffer.front();
                 msg_buffer.pop();
+
                 pkt buffer_packet = make_packet(host_a.next_seqnum, message);
                 unacked[host_a.next_seqnum % host_a.N] = buffer_packet;
                 tolayer3(A, buffer_packet);
@@ -175,16 +174,23 @@ void A_input(struct pkt packet)
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
-    pkt packet = unacked[host_a.base % host_a.N];
-    int base = packet.seqnum;
-    tolayer3(A, packet);
-    starttimer(A, TIMEOUT);
-    base++;
+    //pkt packet = unacked[host_a.base % host_a.N];
+    //int base = packet.seqnum;
+    //tolayer3(A, packet);
+    //starttimer(A, TIMEOUT);
+    //base++;
 
-    while (base < host_a.next_seqnum)
+    //while (base < host_a.next_seqnum)
+    //{
+    //    tolayer3(A, unacked[base % host_a.N]);
+    //    base++;
+    //}
+
+    
+    starttimer(A, TIMEOUT);
+    for (int i = host_a.base; i < host_a.next_seqnum; i++)
     {
-        tolayer3(A, unacked[base % host_a.N]);
-        base++;
+        tolayer3(A, unacked[i % host_a.N]);
     }
 }
 
