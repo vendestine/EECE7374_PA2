@@ -38,7 +38,7 @@ struct Receiver
 
 
 int winSize = 0;
-float RTT = 15.0;
+float RTT = 100.0;
 
 //initial a buffer for side A that stores unsent message
 vector<msg> msgBufferA;

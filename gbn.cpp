@@ -2,7 +2,6 @@
 
 /* ******************************************************************
  ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
-
    This code should be used for PA2, unidirectional data transfer
    protocols (from A to B). Network properties:
    - one way network delay averages five time units (longer if there
@@ -14,215 +13,177 @@
 **********************************************************************/
 
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
-#include<vector>
-#include<iostream>
-#include<stdio.h>
-#include<string.h>
+
+#include <iostream>
+#include <cstring>
+#include <queue>
 
 using namespace std;
 
-std::vector<pkt> msgBufferA;
-std::vector<pkt> msgQueue;
-#define FALSE 0
-#define TRUE 1
+//define host A and B
+#define A 0
+#define B 1
 
+//define timeout for retransmission
+#define TIMEOUT 100.0
+
+//packet in the window
+vector<pkt> unacked(1000 + 10);
+
+//message buffer outside window
+queue<msg> buffer;
+
+
+//ACK packet
+pkt ack_packet;
+
+//create variables for sender
 struct Sender
 {
     int base;
-    int seqnum;
-    int acknum;
     int next_seqnum;
+    int N;
+
 }host_a;
 
+//create variables for receiver
 struct Receiver
 {
-    int next_seqnum;
+    int expected_seqnum;
+
 }host_b;
 
 
-int WINDOWSIZE = 1;
-float RTT = 100.0;
-int timerStarted = 0;
-
-/* To calculate checkSum for packet*/
-int checkSum(struct pkt packet) {
-    int sum = 0;
-    for (int i = 0; i < 20; i++) {
-        sum += packet.payload[i];
+//calculate the checksum of a packet
+int get_checksum(pkt packet)
+{
+    int checksum = 0;
+    checksum += packet.seqnum;
+    checksum += packet.acknum;
+    for (int i = 0; i < 20; ++i)
+    {
+        checksum += packet.payload[i];
     }
-    sum += packet.acknum;
-    sum += packet.seqnum;
-
-    return sum;
+    return checksum;
 }
 
-/* To calculate checkSum for ACK packet*/
-int checkACKSum(struct pkt packet) {
-    int sum = 0;
-    sum += packet.acknum;
-    sum += packet.seqnum;
-
-    return sum;
-}
-
-/*To generate ACK packet*/
-static pkt make_ACKpacket(int seqnum, int acknum) {
-    struct pkt packet;
+//make packet for sender
+pkt make_packet(int seqnum, msg message)
+{
+    pkt packet;
     packet.seqnum = seqnum;
-    packet.acknum = seqnum;
-    packet.checksum = seqnum + seqnum;
-    memset(packet.payload, 0, sizeof(packet.payload));
+    //excpeted ack number is sequnce number
+    packet.acknum = 0;
+    strncpy(packet.payload, message.data, 20);
+    packet.checksum = get_checksum(packet);
     return packet;
 }
 
-/*Create a new packet*/
-static pkt make_packet(int seqnum, int acknum, char* data) {
-    struct pkt packet;
+//make packet for receiver
+pkt make_ACKpacket(int acknum)
+{
+    pkt packet;
+    //for ACK packet, we only focus ack number
+    packet.seqnum = 0;
     packet.acknum = acknum;
-    packet.seqnum = seqnum;
-    strncpy(packet.payload, data, 20);
-    packet.checksum = checkSum(packet);
+    memset(packet.payload, 0, sizeof(packet.payload));
+    packet.checksum = get_checksum(packet);
     return packet;
+
 }
 
-/* Sending packet to layer 3*/
-void send_packet(int flag, struct pkt packet) {
-    tolayer3(flag, packet);
-}
 
-/* Send the next packet in Queue */
-void send_nextpacket(int flag) {
-    struct pkt packet = msgQueue.front();
-    cout << "Sending packet seq -> " << packet.seqnum << endl;
-    send_packet(flag, packet);
-    msgQueue.erase(msgQueue.begin());
-    // if(seqnum == base){
-    if (timerStarted == 0) {
-        // To start A's Timer
-        cout << " ########################################################TIMER STARTED FOR A WITH SIM TIME >>>> " << RTT << endl;
-        starttimer(flag, RTT);
-        timerStarted = 1;
-    }
-}
 
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message)
 {
-    pkt packet = make_packet(host_a.seqnum, host_a.acknum, message.data);
-    msgBufferA.push_back(packet);
-    msgQueue.push_back(packet);
-    if ((host_a.next_seqnum - host_a.base) < WINDOWSIZE && msgQueue.size() > 0) {
-        cout << "Packet sent: " << host_a.seqnum << endl;
-        send_nextpacket(0);
-        host_a.next_seqnum = host_a.next_seqnum + 1;
+    
+    if (host_a.next_seqnum < (host_a.base + host_a.N))
+    {
+        pkt packet = make_packet(host_a.next_seqnum, message);
+        unacked[host_a.next_seqnum]= packet;
+        tolayer3(A, packet);
+
+        if (host_a.base == host_a.next_seqnum)
+        {
+            starttimer(A, TIMEOUT);
+        }
+        host_a.next_seqnum++;
     }
-    host_a.seqnum = host_a.seqnum + 1;
+
+    else
+    {
+        buffer.push(message);
+    }
 }
 
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-    int evalCheckSum = checkACKSum(packet);
-    if (packet.checksum == evalCheckSum) {
-        // if(packet.seqnum == nextSeqNoA){
-          // cout << "IN IF LOOP" << endl;
-        host_a.acknum = packet.acknum;
-        //to remove packet from buffer for which acknowledgment has been received
-        if (msgBufferA.size() > 0 && host_a.acknum == msgBufferA.begin()->seqnum) {
-            cout << "REMOVE FROM BUFFER " << endl;
-            stoptimer(0);
-            timerStarted = 0;
-            host_a.base += 1;
-            cout << "ACK RECIEVED: " << packet.acknum << endl;
-            msgBufferA.erase(msgBufferA.begin());
-            if ((host_a.next_seqnum - host_a.base) < WINDOWSIZE) {
-                cout << "Next Packet Sent : " << endl;
-                if (msgQueue.size() > 0) {
-                    send_nextpacket(0);
-                };
-                if (timerStarted == 0) {
-                    starttimer(0, RTT);
-                    timerStarted = 1;
-                    cout << "NEXT -----------------------------------------------TIME RESTARTED-----------------------------------------------" << endl;
-                }
-            }
+    if (packet.checksum == get_checksum(packet) && (packet.acknum >= host_a.base))
+    {
+        stoptimer(A);
+        while (host_a.base <= packet.acknum)
+        {
+            unacked.erase(unacked.begin() + host_a.base);
+            host_a.base++;
+        }
+           
+        while (!buffer.empty() && host_a.next_seqnum < (host_a.base + host_a.N))
+        {
+            msg message = buffer.front();
+            buffer.pop();
+            pkt buffer_packet = make_packet(host_a.next_seqnum, message);
+            unacked[host_a.next_seqnum] = buffer_packet;
+            tolayer3(A, buffer_packet);
+            host_a.next_seqnum++;
+        }
+
+        if (host_a.base != host_a.next_seqnum) {
+            starttimer(A, TIMEOUT);
         }
     }
-    cout << "-----------------------------------------------------------------------------------------------------------------------------------------------------------" << endl;
 }
 
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
-    cout << "TIMER INTERRUPT" << endl;
-    int restarted = 0;
-    host_a.next_seqnum = host_a.base;
-    msgQueue.clear();
-    msgQueue = msgBufferA;
-    for (vector<pkt>::iterator resendPkt = msgQueue.begin(); resendPkt != msgQueue.end();) {
-        if ((host_a.next_seqnum - host_a.base) < WINDOWSIZE && msgQueue.size() > 0) {
-            cout << "Resending packet with seq num -> " << resendPkt->seqnum << endl;
-            // sendNxtPkt(0);
-            send_packet(0, *resendPkt);
-            msgQueue.erase(msgQueue.begin());
-            host_a.next_seqnum = host_a.next_seqnum + 1;
-            if (restarted == 0) {
-                cout << "-----------------------------------------------TIME RESTARTED-----------------------------------------------" << endl;
-                starttimer(0, RTT);
-                timerStarted = 1;
-                restarted = 1;
-            }
-        }
-        else {
-            ++resendPkt;
-        }
+    
+    for (int i = host_a.base; i < host_a.next_seqnum; i++)
+    {
+        tolayer3(A, unacked[i]);
     }
+    starttimer(A, TIMEOUT);
+
 }
 
 /* the following routine will be called once (only) before any other */
 /* entity A routines are called. You can use it to do any initialization */
 void A_init()
 {
-    cout << "A Initialised!" << endl;
     host_a.base = 1;
-    host_a.seqnum = 1;
-    host_a.acknum = 1;
-    WINDOWSIZE = getwinsize();
     host_a.next_seqnum = 1;
-    msgBufferA.clear();
-    msgQueue.clear();
+    host_a.N = getwinsize();
 }
 
-/* Note that with simplex transfer from a-to-B, there is no B_output() */
 
+/* Note that with simplex transfer from a-to-B, there is no B_output() */
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 void B_input(struct pkt packet)
 {
-    cout << ">>>>>>>>>>>> RECIEVED AT B >> " << "SEQNUM >> " << packet.seqnum << endl;
-    int cs = checkSum(packet);
-    if (packet.checksum != cs) {
-        // cout << "RETURNED FROM HERE ITSELF" << endl;
-        return;
+    if (packet.checksum == get_checksum(packet) && packet.seqnum == host_b.expected_seqnum)
+    {
+        tolayer5(B, packet.payload);
+        ack_packet = make_ACKpacket(host_b.expected_seqnum);
+        host_b.expected_seqnum++;
     }
-    if (packet.seqnum != host_b.next_seqnum) {
-        cout << "FIRST LOOP TRIGGERED WHERE VALUES NOT EQUAL" << endl;
-        struct pkt ack = make_ACKpacket(packet.seqnum, 1);
-        tolayer3(1, ack);
-        return;
-    }
-    else {
-        cout << "SECOND LOOP TRIGGERED WHERE COMMS TO 5 and 3 BOTH" << endl;
-        tolayer5(1, packet.payload);
-        struct pkt ack = make_ACKpacket(host_b.next_seqnum, 1);
-        tolayer3(1, ack);
-        host_b.next_seqnum += 1;
-    }
+    tolayer3(B, ack_packet);
 }
 
 /* the following rouytine will be called once (only) before any other */
 /* entity B routines are called. You can use it to do any initialization */
 void B_init()
 {
-    cout << "B Initialised!" << endl;
-    host_b.next_seqnum = 1;
+    host_b.expected_seqnum = 1;
+    ack_packet = make_ACKpacket(0);
 }

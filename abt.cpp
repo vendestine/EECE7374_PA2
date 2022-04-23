@@ -119,7 +119,7 @@ void A_output(struct msg message)
 void A_input(struct pkt packet)
 {
     //receive right ACK packet, no corruption, stop timer
-    if ((packet.checksum == get_checksum(packet)) || (packet.acknum == host_a.acknum))
+    if ((packet.checksum == get_checksum(packet)) && (packet.acknum == host_a.acknum))
     {
         stoptimer(A);
         //flip sender sequnce number for next packet
@@ -185,7 +185,7 @@ void B_input(struct pkt packet)
         if (packet.acknum == host_b.acknum)
         {
             tolayer5(B, packet.payload);
-            ////flip receiver ack number for next packet
+            //flip receiver ack number for next packet
             host_b.acknum = (host_b.acknum + 1) % 2;
         }
     }
