@@ -25,14 +25,13 @@ using namespace std;
 #define B 1
 
 //define timeout for retransmission
-#define TIMEOUT 20.0
+#define TIMEOUT 100.0
 
 //packet in the window
 vector<pkt> unacked(1000);
 
 //message buffer outside window
 queue<msg> msg_buffer;
-
 
 //ACK packet
 pkt ack_packet;
@@ -42,7 +41,6 @@ struct Sender
 {
 	int base;
 	int next_seqnum;
-	int last_ack;
 	int N;
 }host_a;
 
@@ -142,7 +140,7 @@ void A_input(struct pkt packet)
 		host_a.base = packet.acknum + 1;
 		stoptimer(A);
 
-		if (host_a.next_seqnum > host_a.base)
+		if (host_a.next_seqnum != host_a.base)
 			starttimer(A, TIMEOUT);
 	}
 
@@ -155,19 +153,6 @@ void A_input(struct pkt packet)
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
-	//pkt packet = unacked[host_a.base % host_a.N];
-	//int base = packet.seqnum;
-	//tolayer3(A, packet);
-	//starttimer(A, TIMEOUT);
-	//base++;
-
-	//while (base < host_a.next_seqnum)
-	//{
-	//    tolayer3(A, unacked[base % host_a.N]);
-	//    base++;
-	//}
-
-
 	starttimer(A, TIMEOUT);
 	for (int i = host_a.base; i < host_a.next_seqnum; i++)
 	{
@@ -182,7 +167,6 @@ void A_init()
 	host_a.base = 1;
 	host_a.next_seqnum = 1;
 	host_a.N = getwinsize();
-	host_a.last_ack = 0;
 }
 
 
