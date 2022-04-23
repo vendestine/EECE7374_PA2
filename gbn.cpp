@@ -25,7 +25,7 @@ using namespace std;
 #define B 1
 
 //define timeout for retransmission
-#define TIMEOUT 100.0
+#define TIMEOUT 20.0
 
 //packet in the window
 vector<pkt> unacked(1000);
@@ -99,7 +99,7 @@ void A_output(struct msg message)
 		if (msg_buffer.empty())
 		{
 			pkt packet = make_packet(host_a.next_seqnum, message);
-			unacked[host_a.next_seqnum % host_a.N] = packet;
+			unacked[host_a.next_seqnum] = packet;
 			tolayer3(A, packet);
 
 			if (host_a.base == host_a.next_seqnum)
@@ -116,7 +116,7 @@ void A_output(struct msg message)
 
 
 			pkt packet = make_packet(host_a.next_seqnum, buffer_message);
-			unacked[host_a.next_seqnum % host_a.N] = packet;
+			unacked[host_a.next_seqnum] = packet;
 			tolayer3(A, packet);
 
 			if (host_a.base == host_a.next_seqnum)
@@ -138,10 +138,14 @@ void A_input(struct pkt packet)
 	if (packet.checksum == get_checksum(packet))
 	{
 		host_a.base = packet.acknum + 1;
-		stoptimer(A);
-
-		if (host_a.next_seqnum != host_a.base)
+		
+		if (host_a.base == host_a.next_seqnum)
+			stoptimer(A);
+		else
+		{
+			stoptimer(A);
 			starttimer(A, TIMEOUT);
+		}
 	}
 
 	else
