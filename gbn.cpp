@@ -25,7 +25,7 @@ using namespace std;
 #define B 1
 
 //define timeout for retransmission
-#define TIMEOUT 20.0
+#define TIMEOUT 100.0
 
 //packet in the window
 vector<pkt> unacked(1000);
@@ -160,7 +160,7 @@ void A_timerinterrupt()
 	starttimer(A, TIMEOUT);
 	for (int i = host_a.base; i < host_a.next_seqnum; i++)
 	{
-		tolayer3(A, unacked[i % host_a.N]);
+		tolayer3(A, unacked[i]);
 	}
 }
 
