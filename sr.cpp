@@ -1,9 +1,13 @@
 #include "../include/simulator.h"
+#include <iostream>
+#include <cstring>
+#include <vector>
+#include <queue>
 
 /* ******************************************************************
  ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
 
-   This code should be used for PA2, unidirectional data transfer 
+   This code should be used for PA2, unidirectional data transfer
    protocols (from A to B). Network properties:
    - one way network delay averages five time units (longer if there
      are other messages in the channel for GBN), but can be larger
@@ -13,201 +17,166 @@
      (although some can be lost).
 **********************************************************************/
 
-#include<vector>
-#include<queue>
-#include<unordered_map>
-#include<iostream>
-#include<stdio.h>
-#include<string.h>
-
-using namespace std;
-
-struct Sender
-{
-  int send_base;
-  int seqnum;
-  int acknum;
-  int next_seqnum;
-}host_a;
-
-struct Receiver
-{
-  int rcv_base;
-  int next_seqnum;
-}host_b;
-
-
-int winSize = 0;
-float RTT = 100.0;
-
-//initial a buffer for side A that stores unsent message
-vector<msg> msgBufferA;
-//initialize a buffer for side B that stores packets' seq number and the packets (not yet send up to layer 5)
-vector<pair<int, pkt>> msgBufferB;
-
-
-//two hash maps, one stores the packet seq number and the time it was sent. Another keeps track of whether or not if a packet was acked.
-unordered_map<int, float> timeStamps;
-unordered_map<int, bool> acked;
-
-//using a queue to store the order of packet's seq number 
-queue<int> pacTimeOrder;
-
-
-/* To calculate checkSum for packet*/
-int checkSum(struct pkt packet) {
-  int sum = 0;
-  for (int i = 0; i < 20; i++) {
-    sum += packet.payload[i];
-  }
-  sum += packet.acknum;
-  sum += packet.seqnum;
-
-  return sum;
-}
-
-/* Sending packet to layer 3*/
-void send_packet(int flag, struct pkt packet) {
-  tolayer3(flag, packet);
-}
-
-//send packet at side A
-void send_nextpacket(int flag) {
-  //while there is message left in side A's buffer, keep sending
-  while (host_a.next_seqnum - host_a.send_base < winSize && host_a.next_seqnum < msgBufferA.size()) {
-    //construct the packet
-    struct pkt packet;
-    packet.seqnum = host_a.next_seqnum;
-    packet.acknum = host_a.acknum;
-    strncpy(packet.payload, msgBufferA[host_a.next_seqnum].data, 20);
-    packet.checksum = checkSum(packet);
-    cout << "Sending packet seq -> " << packet.seqnum << endl;
-    send_packet(flag, packet);
-    //store the time that a packet was sent
-    timeStamps[host_a.next_seqnum] = get_sim_time();
-    //initialize the ack status of the seq num to be false
-    acked[host_a.next_seqnum] = false;
-    //push the packet's seq num to the front of the queue so that it will be popped first
-    pacTimeOrder.push(host_a.next_seqnum);
-    host_a.next_seqnum += 1;
-
-    //if there is only one packet in the packet order array, start the timer. Since there is no need to start timer when its 0
-    //and the timer would already be started if its bigger than 1.
-    if (pacTimeOrder.size() == 1) {
-      // To start A's Timer
-      cout << " ########################################################TIMER STARTED FOR A WITH SIM TIME >>>> " << RTT << endl;
-      starttimer(flag, RTT);
-    }
-  }
-}
-
-//function that returns the position of deesired receiver base in side B's buffer, return -1 if not found
-int findRcvBase() {
-  for (int i = 0; i < msgBufferB.size(); i++) {
-    if (msgBufferB[i].first == host_b.rcv_base) {
-      return i;
-    }
-  }
-  return -1;
-}
-
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
+#define A 0
+#define B 1
+
+// Struct defining packet metadata
+struct pktData {
+    pkt packet;
+
+    int timeSent;
+
+    bool wasSent;
+    bool wasAckd;
+};
+
+float TIMEOUT = 20;
+int ASeqnumFirst = 0;            // SeqNum of first frame in window. Same as send_base
+int ASeqnumN = 0;                // SeqNum of Nth frame in window. Same as nextseqnum
+std::vector<pktData> packets;    // To store all frames of data. This acts as our sender view
+int it = -1;                     // Ensures physical timer is only called once in A_output
+
+int BRcvBase = 0;                // Expected SeqNum of first frame in receiver window. Same as rcv_base
+int BRcvN = 0;
+std::vector<pktData> recvBuffer; // Buffer of received packets. Will help deliver consecutively numbered packets
+
+std::queue<msg> buffer;
+
+// HELPER FUNCTIONS
+int getChecksum(struct pkt packet)
+{
+    int checksum = packet.seqnum + packet.acknum;
+    for (int i = 0; i < 20; i++) {
+        checksum += packet.payload[i];
+    }
+    return checksum;
+}
+
+pkt makePkt(char payload[], int seqnum, int acknum) {
+    pkt res;
+    strncpy(res.payload, payload, 20);
+    res.seqnum = seqnum;
+    res.acknum = acknum;
+    res.checksum = getChecksum(res);
+    return res;
+}
+
+pktData makePktData(char payload[], int seqnum, int acknum) {
+    pktData res;
+    res.packet = makePkt(payload, seqnum, acknum);
+    res.timeSent = get_sim_time();
+    return res;
+}
 
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message)
 {
-  msgBufferA.push_back(message);
-  //if its within the alloed range, then send, otherwise just store in the buffer
-  if (host_a.next_seqnum < host_a.send_base + winSize) {
-    cout << "sending" << endl;
-    send_nextpacket(0);
-  }
+    if (ASeqnumN - ASeqnumFirst < getwinsize()) {
+
+        if (buffer.empty())
+        {
+            struct pktData pktDat = makePktData(message.data, ASeqnumN, -1); // Construct packet
+            packets.push_back(pktDat); // Add packet to our sender view
+            pktDat.wasSent = true; // Flag as sent (don't need to set for other case since its initialized to false by default)
+            tolayer3(A, pktDat.packet); // Send to layer3, set timer if it hasnt been set
+            starttimer(A, TIMEOUT); // Start first physical timer. This is only called once.
+            ASeqnumN++; // Increase upper limit of window regardless, since we know packets buffered or not will get sent regardless
+        }
+        else
+        {
+            buffer.push(message);
+            msg buffer_message = buffer.front();
+            buffer.pop();
+
+            struct pktData pktDat = makePktData(buffer_message.data, ASeqnumN, -1); // Construct packet
+            packets.push_back(pktDat); // Add packet to our sender view
+            pktDat.wasSent = true; // Flag as sent (don't need to set for other case since its initialized to false by default)
+            tolayer3(A, pktDat.packet); // Send to layer3, set timer if it hasnt been set
+            starttimer(A, TIMEOUT); // Start first physical timer. This is only called once.
+            ASeqnumN++; // Increase upper limit of window regardless, since we know packets buffered or not will get sent regardless
+        }
+
+    }
+    else
+    {
+        buffer.push(message);
+    }
 }
 
 /* called from layer 3, when a packet arrives for layer 4 */
 void A_input(struct pkt packet)
 {
-  int resCheckSum = checkSum(packet);
-  if (resCheckSum == packet.checksum) {
-    cout << "ack checksum verified" << endl;
-    //mark the packet's seq num as acked
-    acked[packet.acknum] = true;
-    if (packet.acknum == host_a.send_base) {
-      //advance window base to nextr unACKed seq number
-      while (host_a.send_base < msgBufferA.size() && acked[host_a.send_base] == true){
-        host_a.send_base++;
-      }
-      send_nextpacket(0);
-    }
+    if (getChecksum(packet) == packet.checksum) {
+        packets[packet.seqnum].wasAckd = true; // Mark as recv'd
+        if (packet.seqnum == ASeqnumFirst) {
+            // If packets seqnum is equal to the base, move up the base to the unackd packet with the smallest seq number
+            while (!packets[ASeqnumFirst].wasAckd) ASeqnumFirst++;
+            stoptimer(A);
+            //Check window for untransmitted packets and retransmit them
+            for (int i = ASeqnumFirst; i < ASeqnumN; i++) {
+                if (!packets[i].wasSent) {
+                    packets[i].wasSent = true;
+                    packets[i].timeSent = get_sim_time();
+                    tolayer3(A, packets[i].packet);
+                    starttimer(A, TIMEOUT);
+                }
+            }
+        }
 
-    //expecting the packet with seq number in the front of packet order queue
-    int expectedPacket = pacTimeOrder.front();
-    if (packet.acknum == expectedPacket) {
-      //if received expected ack, then stop timer
-      stoptimer(0);
-      cout << "expected ack received, timer stopped";
-      //pop all ACKed packet seq number
-      while (pacTimeOrder.size() > 0 && acked[pacTimeOrder.front()] == true) {
-        pacTimeOrder.pop();
-      }
-      //get the start time of the next unACKed packet
-      float startTime = timeStamps[pacTimeOrder.front()];
-      if (pacTimeOrder.size() > 0) {
-        cout << "Timer started for the next packet" << endl;
-        //then start timer with the set time minus the time elapsed since the packet was sent
-        //the time elapsed is obtaineed by minusing the time right now to the time it was sent out.
-        starttimer(0, RTT - (get_sim_time() - startTime));
-      }
+        else
+        {
+            //stoptimer(A);
+            starttimer(A, TIMEOUT);
+        }
+
+        // Retransmit any packets that might be expired
+        //if (ASeqnumFirst < ASeqnumN) {
+        //    for (int i = ASeqnumFirst; i < ASeqnumN; i++) {
+        //        int deltaTime = get_sim_time() - packets[i].timeSent;
+        //        if (deltaTime >= TIMEOUT && !packets[i].wasAckd) {
+        //            packets[i].timeSent = get_sim_time();
+        //            tolayer3(A, packets[i].packet);
+        //            //starttimer(A, TIMEOUT);
+        //        }
+        //    }
+        //}
     }
-  }
 }
 
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
-  cout << "timer stopped";
-  //get the seq number of the packet that was interruppted
-  int packetLost = pacTimeOrder.front();
-  //remake the packet
-  struct pkt packet;
-  packet.seqnum = packetLost;
-  packet.acknum = host_a.acknum;
-  strncpy(packet.payload, msgBufferA[packetLost].data, 20);
-  packet.checksum = checkSum(packet);
+    //packets[ASeqnumFirst].timeSent = get_sim_time(); // First, update starttime for packet
+    //tolayer3(A, packets[ASeqnumFirst].packet);       // Resend the base packet since the timer is tied in to the base
+    //starttimer(A, TIMEOUT);                          // Restart timer
 
-  //pop that packet's seq number from the packet order queue
-  pacTimeOrder.pop();
 
-  //advance to the next unACKed packet
-  while (pacTimeOrder.size() > 0 && acked[pacTimeOrder.front()]) {
-    pacTimeOrder.pop();
-  }
-  //start timer again, similar to A_input
-  float startTime = timeStamps[pacTimeOrder.front()];
-  if (pacTimeOrder.size() > 0) {
-    starttimer(0, RTT - (get_sim_time() - startTime));
-    cout << "Timer started";
-  }
-  //re-push the packet seq number into the queue and get the new time it was sent out
-  pacTimeOrder.push(packetLost);
-  timeStamps[packetLost] = get_sim_time();
-  send_packet(0, packet);
-  
-  //start timer if the interuppted packet is the only one left in queue
-  if (pacTimeOrder.size() == 1) {
-    starttimer(0, RTT);
-  }
-}  
+    //for (int i = ASeqnumFirst; i < ASeqnumN; i++) {
+    //    if (!packets[i].wasSent) {
+    //        packets[i].wasSent = true;
+    //        packets[i].timeSent = get_sim_time();
+    //        tolayer3(A, packets[i].packet);
+    //        starttimer(A, TIMEOUT);
+    //    }
+    //}
+
+    if (ASeqnumFirst < ASeqnumN) {
+        for (int i = ASeqnumFirst; i < ASeqnumN; i++) {
+            int deltaTime = get_sim_time() - packets[i].timeSent;
+            if (deltaTime >= TIMEOUT && !packets[i].wasAckd) {
+                packets[i].timeSent = get_sim_time();
+                tolayer3(A, packets[i].packet);
+                starttimer(A, TIMEOUT);
+            }
+        }
+    }
+}
 
 /* the following routine will be called once (only) before any other */
 /* entity A routines are called. You can use it to do any initialization */
 void A_init()
 {
-  host_a.send_base = 0;
-  host_a.next_seqnum = 0;
-  host_a.acknum = 0;
-  host_a.seqnum = 0;
-  winSize = getwinsize();
 }
 
 /* Note that with simplex transfer from a-to-B, there is no B_output() */
@@ -215,42 +184,46 @@ void A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 void B_input(struct pkt packet)
 {
-  int resCheckSum = checkSum(packet);
-  if (resCheckSum == packet.checksum) {
-    cout << "Checksum verified" << endl;
-
-    //send ack packet
-    struct pkt ackPacket;
-    ackPacket.seqnum = 0;
-    ackPacket.acknum = packet.seqnum;
-    memset(ackPacket.payload, 0, 20);
-    ackPacket.checksum = checkSum(ackPacket);
-
-    send_packet(1, ackPacket);
-    cout << "ACK sent" << endl;
-    //send to layer 5 if the packet seq number is as expected, otherwise buffer
-    if (host_b.rcv_base == packet.seqnum) {
-      tolayer5(1, packet.payload);
-      host_b.rcv_base++;
-    } else if (packet.seqnum >= host_b.rcv_base && packet.seqnum <= host_b.rcv_base + winSize - 1) {
-      msgBufferB.push_back({packet.seqnum, packet});
+    BRcvN = BRcvBase + getwinsize(); // Update BRcvN
+    char msg[20];
+    strncpy(msg, packet.payload, 20);
+    if (getChecksum(packet) == packet.checksum) {
+        // Handle two cases, where seqNum is in [BRcvBase, BRcvBase+N-1], or in [BRcvBase-N, BRcvBase-1]
+        if (packet.seqnum <= BRcvN + 1 && packet.seqnum >= BRcvBase) {
+            // If packet has not been previously received, it is buffered
+            if (recvBuffer[packet.seqnum].packet.seqnum == -1) {
+                pkt ack = makePkt(msg, packet.seqnum, packet.seqnum); // Create ACK
+                recvBuffer[packet.seqnum].packet = ack;               // Buffer ACK
+                tolayer3(B, ack);                                     // Send ACK
+            }
+            // Send packet to upper layer if the seqnum is rcv_base
+            if (BRcvBase == packet.seqnum) {
+                tolayer5(B, packet.payload);
+                recvBuffer[packet.seqnum].wasSent = true; // Flag as being sent (to upper layer)
+                // Send any consecutive packets in [rcv_base, rcv_base+N-1]
+                for (int i = BRcvBase; i < BRcvN + 1; i++) {
+                    if (!recvBuffer[i + 1].wasSent && recvBuffer[i + 1].packet.acknum != -1) {
+                        tolayer5(B, recvBuffer[i + 1].packet.payload);
+                        BRcvBase++;
+                    }
+                    else break;
+                }
+                BRcvBase++; // Increment once here to account for the initial packet whose ack is the base
+            }
+        }
+        else if (packet.seqnum <= BRcvBase - 1 && packet.seqnum >= BRcvBase - getwinsize()) {
+            tolayer3(B, makePkt(msg, packet.seqnum, packet.seqnum));
+        }
     }
-  }
-
-  //find if the updated expected seq number is in the buffer. If so, deliver the buffered packets
-  int basePos = findRcvBase();
-  while (msgBufferB.size() > 0 && basePos != -1) {
-    char data[20];
-    strncpy(data, msgBufferB[basePos].second.payload, 20);
-    tolayer5(1, data);
-    host_b.rcv_base += 1;
-    basePos = findRcvBase();
-  }
 }
 
 /* the following rouytine will be called once (only) before any other */
 /* entity B routines are called. You can use it to do any initialization */
 void B_init()
 {
-  host_b.rcv_base = 0;
+    char tmp[1] = "";
+    // Fill recv buffer with empty packets
+    for (int i = 0; i < 1000; i++) {
+        recvBuffer.push_back(makePktData(tmp, -1, -1));
+    }
 }
