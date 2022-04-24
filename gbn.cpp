@@ -33,14 +33,14 @@ vector<pkt> unacked(1000);
 //message buffer outside window
 queue<msg> msg_buffer;
 
-//ACK packet
-pkt ack_packet;
-
 //create variables for sender
 struct Sender
 {
+	//window start position
 	int base;
+	//pakcet sequence number
 	int next_seqnum;
+	//window size
 	int N;
 }host_a;
 
@@ -48,6 +48,8 @@ struct Sender
 struct Receiver
 {
 	int expected_seqnum;
+	//ACK packet
+	pkt ack_packet;
 
 }host_b;
 
@@ -94,20 +96,26 @@ pkt make_ACKpacket(int acknum)
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message)
 {
+	//packet sequence number in the window
 	if (host_a.next_seqnum < host_a.base + host_a.N)
 	{
+		//no message in buffer, send current packet
 		if (msg_buffer.empty())
 		{
 			pkt packet = make_packet(host_a.next_seqnum, message);
+			//record packet in the window for possible retransmission
 			unacked[host_a.next_seqnum] = packet;
 			tolayer3(A, packet);
 
+			//if sequncen number in the base position, start timer
 			if (host_a.base == host_a.next_seqnum)
 				starttimer(A, TIMEOUT);
+			//move the next packet
 			host_a.next_seqnum++;
 
 		}
 
+		//there is message in buffer, buffer current message and send the first message in buffer
 		else
 		{
 			msg_buffer.push(message);
@@ -125,6 +133,7 @@ void A_output(struct msg message)
 		}
 	}
 
+	//packet sequence number outside the window
 	else
 	{
 		msg_buffer.push(message);
@@ -137,10 +146,13 @@ void A_input(struct pkt packet)
 {
 	if (packet.checksum == get_checksum(packet))
 	{
+		//get ack to update base which means slide the window
 		host_a.base = packet.acknum + 1;
 		
+		//window slide perfectly, all pakcets received, no need retransmission
 		if (host_a.base == host_a.next_seqnum)
 			stoptimer(A);
+		//need transmission, start timer again
 		else
 		{
 			stoptimer(A);
@@ -158,6 +170,7 @@ void A_input(struct pkt packet)
 void A_timerinterrupt()
 {
 	starttimer(A, TIMEOUT);
+	//go back to base position, and resend packet in [base, next_sequencenum - 1]
 	for (int i = host_a.base; i < host_a.next_seqnum; i++)
 	{
 		tolayer3(A, unacked[i]);
@@ -178,13 +191,16 @@ void A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 void B_input(struct pkt packet)
 {
+	//packet no corruption and receive right sequence number
 	if (packet.checksum == get_checksum(packet) && packet.seqnum == host_b.expected_seqnum)
 	{
 		tolayer5(B, packet.payload);
-		ack_packet = make_ACKpacket(host_b.expected_seqnum);
+		//update ack
+		host_b.ack_packet = make_ACKpacket(host_b.expected_seqnum);
 		host_b.expected_seqnum++;
 	}
-	tolayer3(B, ack_packet);
+	//default behavior, send ack packet
+	tolayer3(B, host_b.ack_packet);
 }
 
 /* the following rouytine will be called once (only) before any other */
@@ -192,5 +208,6 @@ void B_input(struct pkt packet)
 void B_init()
 {
 	host_b.expected_seqnum = 1;
-	ack_packet = make_ACKpacket(0);
+	//set first ack number = 0
+	host_b.ack_packet = make_ACKpacket(0);
 }
