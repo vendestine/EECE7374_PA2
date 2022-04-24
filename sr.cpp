@@ -31,17 +31,15 @@ struct pktData {
     bool wasAckd;
 };
 
-float TIMEOUT = 20;
+float TIMEOUT = 100;
 int ASeqnumFirst = 0;            // SeqNum of first frame in window. Same as send_base
 int ASeqnumN = 0;                // SeqNum of Nth frame in window. Same as nextseqnum
 std::vector<pktData> packets;    // To store all frames of data. This acts as our sender view
-int it = -1;                     // Ensures physical timer is only called once in A_output
-
-int BRcvBase = 0;                // Expected SeqNum of first frame in receiver window. Same as rcv_base
-int BRcvN = 0;
-std::vector<pktData> recvBuffer; // Buffer of received packets. Will help deliver consecutively numbered packets
-
 std::queue<msg> buffer;
+
+
+//std::vector<pktData> recvBuffer; // Buffer of received packets. Will help deliver consecutively numbered packets
+
 
 // HELPER FUNCTIONS
 int getChecksum(struct pkt packet)
@@ -109,6 +107,7 @@ void A_input(struct pkt packet)
 {
     if (getChecksum(packet) == packet.checksum) {
         packets[packet.seqnum].wasAckd = true; // Mark as recv'd
+        //stoptimer(A);
         if (packet.seqnum == ASeqnumFirst) {
             // If packets seqnum is equal to the base, move up the base to the unackd packet with the smallest seq number
             while (!packets[ASeqnumFirst].wasAckd) ASeqnumFirst++;
@@ -182,6 +181,12 @@ void A_init()
 /* Note that with simplex transfer from a-to-B, there is no B_output() */
 
 /* called from layer 3, when a packet arrives for layer 4 at B*/
+
+
+int BRcvBase = 0;                // Expected SeqNum of first frame in receiver window. Same as rcv_base
+int BRcvN = 0;
+std::vector<pktData> recvBuffer; // Buffer of received packets. Will help deliver consecutively numbered packets
+
 void B_input(struct pkt packet)
 {
     BRcvN = BRcvBase + getwinsize(); // Update BRcvN
@@ -189,26 +194,27 @@ void B_input(struct pkt packet)
     strncpy(msg, packet.payload, 20);
     if (getChecksum(packet) == packet.checksum) {
         // Handle two cases, where seqNum is in [BRcvBase, BRcvBase+N-1], or in [BRcvBase-N, BRcvBase-1]
-        if (packet.seqnum <= BRcvN + 1 && packet.seqnum >= BRcvBase) {
+        if (packet.seqnum <= BRcvN - 1 && packet.seqnum >= BRcvBase) {
             // If packet has not been previously received, it is buffered
             if (recvBuffer[packet.seqnum].packet.seqnum == -1) {
                 pkt ack = makePkt(msg, packet.seqnum, packet.seqnum); // Create ACK
                 recvBuffer[packet.seqnum].packet = ack;               // Buffer ACK
+                //recvBuffer[packet.seqnum].wasSent = true;
                 tolayer3(B, ack);                                     // Send ACK
             }
             // Send packet to upper layer if the seqnum is rcv_base
             if (BRcvBase == packet.seqnum) {
-                tolayer5(B, packet.payload);
-                recvBuffer[packet.seqnum].wasSent = true; // Flag as being sent (to upper layer)
+                //tolayer5(B, packet.payload);
+                //recvBuffer[packet.seqnum].wasSent = true; // Flag as being sent (to upper layer)
                 // Send any consecutive packets in [rcv_base, rcv_base+N-1]
-                for (int i = BRcvBase; i < BRcvN + 1; i++) {
-                    if (!recvBuffer[i + 1].wasSent && recvBuffer[i + 1].packet.acknum != -1) {
-                        tolayer5(B, recvBuffer[i + 1].packet.payload);
+                for (int i = BRcvBase; i < BRcvN - 1; i++) {
+                    if (recvBuffer[i].packet.acknum != -1) {
+                        tolayer5(B, recvBuffer[i].packet.payload);
                         BRcvBase++;
                     }
                     else break;
                 }
-                BRcvBase++; // Increment once here to account for the initial packet whose ack is the base
+                //BRcvBase++; // Increment once here to account for the initial packet whose ack is the base
             }
         }
         else if (packet.seqnum <= BRcvBase - 1 && packet.seqnum >= BRcvBase - getwinsize()) {
