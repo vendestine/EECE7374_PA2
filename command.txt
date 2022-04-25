@@ -3,3 +3,6 @@
 ./advanced_tests -p ../li.wenzhe1/abt -r ./run_experiments
 
 ./abt -s 1234 -w 50  -m 20 -l 0.0 -c 0.0 -t 1000 -v 2
+
+./run_experiments -o abt_win10_loss0.1.csv -m 1000 -l 0.1 -c 0.2 -t 50 -w 10 -p ../li.wenzhe1/abt
+

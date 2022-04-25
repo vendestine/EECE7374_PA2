@@ -33,6 +33,9 @@ vector<pkt> unacked(1000);
 //message buffer outside window
 queue<msg> msg_buffer;
 
+//window size
+int N;
+
 //create variables for sender
 struct Sender
 {
@@ -40,8 +43,6 @@ struct Sender
 	int base;
 	//pakcet sequence number
 	int next_seqnum;
-	//window size
-	int N;
 }host_a;
 
 //create variables for receiver
@@ -50,7 +51,6 @@ struct Receiver
 	int expected_seqnum;
 	//ACK packet
 	pkt ack_packet;
-
 }host_b;
 
 
@@ -97,14 +97,14 @@ pkt make_ACKpacket(int acknum)
 void A_output(struct msg message)
 {
 	//packet sequence number in the window
-	if (host_a.next_seqnum < host_a.base + host_a.N)
+	if (host_a.next_seqnum < host_a.base + N)
 	{
 		//no message in buffer, send current packet
 		if (msg_buffer.empty())
 		{
 			pkt packet = make_packet(host_a.next_seqnum, message);
 			//record packet in the window for possible retransmission
-			unacked[host_a.next_seqnum] = packet;
+			unacked[host_a.next_seqnum % N] = packet;
 			tolayer3(A, packet);
 
 			//if sequncen number in the base position, start timer
@@ -124,7 +124,7 @@ void A_output(struct msg message)
 
 
 			pkt packet = make_packet(host_a.next_seqnum, buffer_message);
-			unacked[host_a.next_seqnum] = packet;
+			unacked[host_a.next_seqnum % N] = packet;
 			tolayer3(A, packet);
 
 			if (host_a.base == host_a.next_seqnum)
@@ -173,7 +173,7 @@ void A_timerinterrupt()
 	//go back to base position, and resend packet in [base, next_sequencenum - 1]
 	for (int i = host_a.base; i < host_a.next_seqnum; i++)
 	{
-		tolayer3(A, unacked[i % host_a.N]);
+		tolayer3(A, unacked[i % N]);
 	}
 }
 
@@ -183,7 +183,7 @@ void A_init()
 {
 	host_a.base = 1;
 	host_a.next_seqnum = 1;
-	host_a.N = getwinsize();
+	N = getwinsize();
 }
 
 
