@@ -42,6 +42,8 @@ struct Receiver
 	int rcv_base;
 }host_b;
 
+
+//define the new structure, add the send, acked flag and time to the packet
 struct pkt_time_flag
 {
 	pkt packet;
@@ -60,8 +62,8 @@ vector<pkt> receiver_packets(1000);
 //message buffer outside window
 queue<msg> msg_buffer;
 
-
-
+//window size
+int N;
 
 //calculate the checksum of a packet
 int get_checksum(pkt packet)
@@ -76,7 +78,7 @@ int get_checksum(pkt packet)
 	return checksum;
 }
 
-//make packet for sender
+//make packet for sender and receiver
 pkt make_packet(int seqnum, int acknum, msg message)
 {
 	pkt packet;
@@ -88,6 +90,7 @@ pkt make_packet(int seqnum, int acknum, msg message)
 	return packet;
 }
 
+//make data packet from original packet
 pkt_time_flag make_data_packet(pkt packet)
 {
 	pkt_time_flag data_packet;
@@ -96,35 +99,28 @@ pkt_time_flag make_data_packet(pkt packet)
 	return data_packet;
 }
 
-////make packet for receiver
-//pkt make_ACKpacket(int seqnum, int acknum)
-//{
-//	pkt packet;
-//	//for ACK packet, we only focus ack number
-//	packet.seqnum = seqnum;
-//	packet.acknum = acknum;
-//	memset(packet.payload, 0, sizeof(packet.payload));
-//	packet.checksum = get_checksum(packet);
-//	return packet;
-//}
-
-
 /* called from layer 5, passed the data to be sent to other side */
 void A_output(struct msg message)
 {
-	if (host_a.next_seqnum < host_a.send_base + getwinsize())
+	//packet sequence number in the window
+	if (host_a.next_seqnum < host_a.send_base + N)
 	{
+		//no message in buffer, send current packet
 		if (msg_buffer.empty())
 		{
 			pkt packet = make_packet(host_a.next_seqnum, -1, message);
 			pkt_time_flag data_packet = make_data_packet(packet);
+			//record packet in the window for possible retransmission
 			sender_packets[host_a.next_seqnum] = data_packet;
+			//set the sent flag, packet has sent
 			data_packet.is_sent = true;
 			tolayer3(A, packet);
 			starttimer(A, TIMEOUT);
+			//move the next packet
 			host_a.next_seqnum++;
 		}
 
+		//there is message in buffer, buffer current message and send the first message in buffer
 		else
 		{
 			msg_buffer.push(message);
@@ -142,6 +138,7 @@ void A_output(struct msg message)
 
 	}
 
+	//packet sequence number outside the window
 	else
 	{
 		msg_buffer.push(message);
@@ -153,14 +150,17 @@ void A_input(struct pkt packet)
 {
 	if (packet.checksum == get_checksum(packet))
 	{
+		//set acked flag, packet has acked
 		sender_packets[packet.seqnum].is_acked = true;
 
 		if (packet.seqnum == host_a.send_base)
 		{
+			//if pakcet sequence number = send_base, sliding window until send_base to the smallest number in unacked packet
 			while (!sender_packets[host_a.send_base].is_acked) host_a.send_base++;
 
 			stoptimer(A);
 
+			//after sliding window, send the unsent packet in the new window 
 			for (int i = host_a.send_base; i < host_a.next_seqnum; i++)
 			{
 				if (!sender_packets[i].is_sent)
@@ -168,6 +168,7 @@ void A_input(struct pkt packet)
 					sender_packets[i].is_sent = true;
 					sender_packets[i].send_time = get_sim_time();
 					tolayer3(A, sender_packets[i].packet);
+					//each packet has its own timer
 					starttimer(A, TIMEOUT);
 				}
 			}
@@ -183,6 +184,7 @@ void A_input(struct pkt packet)
 /* called when A's timer goes off */
 void A_timerinterrupt()
 {
+	//if timeout resend the packet in the window
 	if (host_a.send_base < host_a.next_seqnum)
 	{
 		for (int i = host_a.send_base; i < host_a.next_seqnum; i++)
@@ -204,6 +206,8 @@ void A_init()
 {
 	host_a.send_base = 0;
 	host_a.next_seqnum = 0;
+
+	N = getwinsize();
 }
 
 
@@ -211,25 +215,28 @@ void A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 void B_input(struct pkt packet)
 {
-	
 	msg message;
 	strncpy(message.data, packet.payload, 20);
 
 	if (packet.checksum == get_checksum(packet))
 	{
-		if (packet.seqnum >= host_b.rcv_base && packet.seqnum <= host_b.rcv_base + getwinsize() - 1)
+		//case1: sequence number in [rcv_base, rcv_base + N - 1]
+		if (packet.seqnum >= host_b.rcv_base && packet.seqnum <= host_b.rcv_base + N - 1)
 		{
+			//if packet not received before, buffer the packet
 			if (receiver_packets[packet.seqnum].seqnum = -1)
 			{
 				pkt ack_packet = make_packet(packet.seqnum, packet.seqnum, message);
-				//strncpy(ack_packet.payload, packet.payload, 20);
+				//buffer the packet
 				receiver_packets[packet.seqnum] = ack_packet;
 				tolayer3(B, ack_packet);
 			}
 
+			//if send_base = sequnce number, send the current packet and previous continous buffer pakcet
 			if (host_b.rcv_base == packet.seqnum)
 			{
-				for (int i = host_b.rcv_base; i <= host_b.rcv_base + getwinsize() - 1; i++)
+				//make sure continuous packets in [rcv_base, rcv_base + N - 1]
+				for (int i = host_b.rcv_base; i <= host_b.rcv_base + N - 1; i++)
 				{
 					if (receiver_packets[i].acknum != -1)
 					{
@@ -241,11 +248,10 @@ void B_input(struct pkt packet)
 			}
 		}
 
-
-		else if (packet.seqnum >= host_b.rcv_base - getwinsize() && packet.seqnum <= host_b.rcv_base - 1)
+		//case 2: sequence number in [rcv_base - N , rcv_base - 1]
+		else if (packet.seqnum >= host_b.rcv_base - N && packet.seqnum <= host_b.rcv_base - 1)
 		{
 			pkt ack_packet = make_packet(packet.seqnum, packet.seqnum, message);
-			//strncpy(ack_packet.payload, packet.payload, 20);
 			tolayer3(B, ack_packet);
 		}
 	}
@@ -262,4 +268,6 @@ void B_init()
 		receiver_packets[i].seqnum = -1;
 		receiver_packets[i].acknum = -1;
 	}
+
+	N = getwinsize();
 }
