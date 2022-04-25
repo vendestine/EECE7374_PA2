@@ -25,7 +25,7 @@ using namespace std;
 #define B 1
 
 //define timeout for retransmission
-#define TIMEOUT 100.0
+#define TIMEOUT 20.0
 
 //create variables for sender
 struct Sender
@@ -150,6 +150,8 @@ void A_input(struct pkt packet)
 {
 	if (packet.checksum == get_checksum(packet))
 	{
+		stoptimer(A);
+
 		//set acked flag, packet has acked
 		sender_packets[packet.seqnum].is_acked = true;
 
@@ -157,8 +159,6 @@ void A_input(struct pkt packet)
 		{
 			//if pakcet sequence number = send_base, sliding window until send_base to the smallest number in unacked packet
 			while (!sender_packets[host_a.send_base].is_acked) host_a.send_base++;
-
-			stoptimer(A);
 
 			//after sliding window, send the unsent packet in the new window 
 			for (int i = host_a.send_base; i < host_a.next_seqnum; i++)
@@ -185,17 +185,14 @@ void A_input(struct pkt packet)
 void A_timerinterrupt()
 {
 	//if timeout resend the packet in the window
-	if (host_a.send_base < host_a.next_seqnum)
+	for (int i = host_a.send_base; i < host_a.next_seqnum; i++)
 	{
-		for (int i = host_a.send_base; i < host_a.next_seqnum; i++)
+		float wait_time = get_sim_time() - sender_packets[i].send_time;
+		if (wait_time >= TIMEOUT && !sender_packets[i].is_acked)
 		{
-			float wait_time = get_sim_time() - sender_packets[i].send_time;
-			if (wait_time >= TIMEOUT && !sender_packets[i].is_acked)
-			{
-				sender_packets[i].send_time = get_sim_time();
-				tolayer3(A, sender_packets[i].packet);
-				starttimer(A, TIMEOUT);
-			}
+			sender_packets[i].send_time = get_sim_time();
+			tolayer3(A, sender_packets[i].packet);
+			starttimer(A, TIMEOUT);
 		}
 	}
 }
